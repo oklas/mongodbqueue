@@ -187,7 +187,7 @@ Queue.prototype.get = async function(opts, callback) {
                 // 2) ack this message from the regular queue
                 // 3) call ourself to return a new message (if exists)
                 await self.deadQueue.add(msg);
-                await self.ack(msg.ack);
+                await self.ack(msg.ack, 'max tries exceeded');
                 msg = await self.get();
                 if (callback) return callback(null, msg);
                 return msg;
