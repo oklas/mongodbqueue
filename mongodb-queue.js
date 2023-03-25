@@ -219,7 +219,11 @@ Queue.prototype.ping = async function(ack, opts, callback) {
     }
 }
 
-Queue.prototype.ack = async function(ack, callback) {
+Queue.prototype.ack = async function(ack, error, callback) {
+    if ( !callback && typeof error === 'function') {
+        callback = error
+        error = undefined
+    }
     try {
         var self = this
 
@@ -231,6 +235,7 @@ Queue.prototype.ack = async function(ack, callback) {
         var update = {
             $set : {
                 deleted : now(),
+                ...(error ? {error} : {})
             }
         }
         var msg = await self.col.findOneAndUpdate(query, update, { returnOriginal : false });
