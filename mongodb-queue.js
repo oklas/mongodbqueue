@@ -49,6 +49,18 @@ function Queue(db, name, opts) {
         this.deadQueue = opts.deadQueue
         this.maxRetries = opts.maxRetries || 5
     }
+
+    if(opts.useV3) {
+        this._insertedIds = this._insertedIdsV3
+        this._returnDocAfter = {returnOriginal : false}
+    }
+    if(opts.useV4) {
+        this._insertedIds = this._insertedIdsV4
+        this._returnDocAfter = {returnDocument : 'after'}
+    }
+    if(!this._insertedIds) {
+        throw Error('mongodb version is not resolved, specify useV3 or useV4 option')
+    }
 }
 
 Queue.prototype.createIndexes = async function(callback) {
@@ -68,6 +80,14 @@ Queue.prototype.createIndexes = async function(callback) {
     }
 }
 
+Queue.prototype._insertedIdsV3 = function(results, idx) {
+  return results.ops[idx]._id
+}
+
+Queue.prototype._insertedIdsV4 = function(results, idx) {
+  return results.insertedIds['' + idx]
+}
+
 Queue.prototype.add = async function(payload, opts, callback) {
     try {
         var self = this
@@ -79,7 +99,7 @@ Queue.prototype.add = async function(payload, opts, callback) {
             opts = {};
         }
         var delay = opts.delay || self.delay
-        var visible = delay ? nowPlusSecs(delay) : now()
+        var visible = delay ? (delay instanceof Date ? delay.toISOString() : nowPlusSecs(delay)) : now()
 
         var msgs = []
         if (payload instanceof Array) {
@@ -106,10 +126,10 @@ Queue.prototype.add = async function(payload, opts, callback) {
         var results = await self.col.insertMany(msgs);
         if (callback) {
             if (payload instanceof Array) return callback(null, '' + results.insertedIds)
-            return callback(null, '' + results.ops[0]._id)
+            return callback(null, '' + self._insertedIds(results, 0))
         }
         if (payload instanceof Array) return '' + results.insertedIds;
-        return '' + results.ops[0]._id;
+        return '' + self._insertedIds(results, 0);
     } catch (err) {
         if(callback) return callback(err);
         throw err;
@@ -143,7 +163,7 @@ Queue.prototype.get = async function(opts, callback) {
             }
         }
 
-        var result = await self.col.findOneAndUpdate(query, update, { sort: sort, returnOriginal : false });
+        var result = await self.col.findOneAndUpdate(query, update, { sort: sort, ...this._returnDocAfter });
         var msg = result.value
         if (!msg) {
             if(callback) return callback();
@@ -204,7 +224,7 @@ Queue.prototype.ping = async function(ack, opts, callback) {
                 visible : nowPlusSecs(visibility)
             }
         }
-        var msg = await self.col.findOneAndUpdate(query, update, { returnOriginal : false });
+        var msg = await self.col.findOneAndUpdate(query, update, { ...this._returnDocAfter });
         if ( !msg.value ) {
             if (callback) return callback(new Error("Queue.ping(): Unidentified ack  : " + ack));
             throw new Error("Queue.ping(): Unidentified ack  : " + ack);
@@ -238,7 +258,7 @@ Queue.prototype.ack = async function(ack, error, callback) {
                 ...(error ? {error} : {})
             }
         }
-        var msg = await self.col.findOneAndUpdate(query, update, { returnOriginal : false });
+        var msg = await self.col.findOneAndUpdate(query, update, { ...this._returnDocAfter });
         if ( !msg.value ) {
             if (callback) return callback(new Error("Queue.ack(): Unidentified ack : " + ack));
             throw new Error("Queue.ack(): Unidentified ack : " + ack);
